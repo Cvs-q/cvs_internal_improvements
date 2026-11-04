@@ -1,0 +1,788 @@
+
+import json
+from io import BytesIO
+
+import frappe
+from frappe import _
+from frappe.utils import flt, getdate, nowdate
+
+from erpnext.accounts.report.accounts_receivable.accounts_receivable import (
+    ReceivablePayableReport,
+)
+
+
+def execute(filters=None):
+    """
+    Custom AR Exposure Summary
+    """
+    args = {
+        "account_type": "Receivable",
+        "naming_by": ["Selling Settings", "cust_master_name"],
+    }
+    columns, data, message, chart, report_summary, skip_total_row = (
+        CustomARExposureSummary(filters).run(args)
+    )
+    return columns, data, message, None, None, skip_total_row
+
+
+class CustomARExposureSummary(ReceivablePayableReport):
+
+    def set_defaults(self):
+        super().set_defaults()
+        self.age_as_on = getdate(self.filters.report_date or nowdate())
+
+    def run(self, args):
+        columns, data, message, chart, report_summary, skip_total_row = super().run(
+            args
+        )
+
+        summary_rows = self.build_customer_summary(data)
+        columns = self.build_required_columns()
+
+        # Add customers who have active OPRs or unbilled DNs but no AR invoices
+        existing_customers = {r["customer"] for r in summary_rows if r.get("customer")}
+        opr_only = self.get_opr_only_customers(existing_customers)
+        unbilled_only = self.get_unbilled_only_customers(
+            existing_customers | set(opr_only)
+        )
+        extra_customers = list(opr_only) + list(unbilled_only)
+        if extra_customers:
+            default_currency = frappe.db.get_value(
+                "Company", self.filters.company, "default_currency"
+            )
+            bucket_count = len(self._get_ageing_labels())
+            for customer in extra_customers:
+                summary_rows.append(
+                    {
+                        "customer": customer,
+                        "currency": default_currency,
+                        "outstanding": 0.0,
+                        **{f"range{i}": 0.0 for i in range(1, bucket_count + 1)},
+                    }
+                )
+
+        self.enrich_customer_rows(summary_rows)
+
+        # Hide rows where all exposure fields are zero (truly inactive customers).
+        # Unbilled Sales is included so customers with only unraised invoices still appear.
+        summary_rows = [
+            r for r in summary_rows
+            if not (
+                flt(r.get("outstanding", 0), 2) == 0
+                and flt(r.get("future_payment", 0), 2) == 0
+                and flt(r.get("unbilled_sales", 0), 2) == 0
+                and flt(r.get("production_oprs", 0), 2) == 0
+                and flt(r.get("hold_oprs", 0), 2) == 0
+            )
+        ]
+
+        summary_rows.sort(key=lambda r: (r.get("customer") or "").lower())
+
+        return columns, summary_rows, message, None, None, 0
+
+    def prepare_conditions(self):
+        super().prepare_conditions()
+
+        if self.filters.get("customer_group"):
+            groups = get_customer_group_with_children(self.filters.customer_group)
+            customers = frappe.get_all(
+                "Customer",
+                filters={"customer_group": ["in", groups]},
+                pluck="name",
+            )
+            if customers:
+                self.qb_selection_filter.append(self.ple.party.isin(customers))
+            else:
+                self.qb_selection_filter.append(self.ple.party == "__NO_CUSTOMERS__")
+
+        if self.filters.get("sales_person"):
+            fieldname = self.get_sales_person_fieldname()
+            assigned_customers = (
+                frappe.get_all(
+                    "Customer",
+                    filters={fieldname: self.filters.sales_person},
+                    pluck="name",
+                )
+                if fieldname
+                else []
+            )
+
+            if assigned_customers:
+                self.qb_selection_filter.append(self.ple.party.isin(assigned_customers))
+            else:
+                self.qb_selection_filter.append(self.ple.party == "__NO_CUSTOMERS__")
+
+        if self.filters.get("customer"):
+            self.qb_selection_filter.append(self.ple.party == self.filters.customer)
+
+    def build_required_columns(self):
+        # Dynamic width: 8px per character + 24px padding, floored at 130 for
+        # currency columns (to fit formatted numbers) and 100 for text/link columns.
+        def w(label, currency=True):
+            floor = 130 if currency else 100
+            return max(floor, len(label) * 8 + 24)
+
+        cols = [
+            {
+                "label": _("Customer"),
+                "fieldname": "customer",
+                "fieldtype": "Link",
+                "options": "Customer",
+                "width": 200,  # fixed: customer names vary widely in length
+            },
+            {
+                "label": _("Sales Person"),
+                "fieldname": "sales_person",
+                "fieldtype": "Data",
+                "width": w("Sales Person", currency=False),
+            },
+        ]
+
+        for i, label in enumerate(self._get_ageing_labels(), start=1):
+            cols.append(
+                {
+                    "label": _(label),
+                    "fieldname": f"range{i}",
+                    "fieldtype": "Currency",
+                    "options": "currency",
+                    "width": w(label),
+                }
+            )
+
+        currency_cols = [
+            ("Total Outstanding",         "outstanding"),
+            ("PDCs",                       "future_payment"),
+            ("Unbilled Sales",            "unbilled_sales"),
+            ("Cheques Required",          "cheques_required"),
+            ("Production OPRs",           "production_oprs"),
+            ("Total Exposure",            "total_exposure"),
+            ("Hold OPRs",                 "hold_oprs"),
+            ("Exposure after Hold OPRs",  "exposure_after_hold_oprs"),
+        ]
+        for label, fieldname in currency_cols:
+            cols.append(
+                {
+                    "label": _(label),
+                    "fieldname": fieldname,
+                    "fieldtype": "Currency",
+                    "options": "currency",
+                    "width": w(label),
+                }
+            )
+
+        cols.extend(
+            [
+                {
+                    "label": _("Payment Terms"),
+                    "fieldname": "payment_terms",
+                    "fieldtype": "Link",
+                    "options": "Payment Terms Template",
+                    "width": w("Payment Terms", currency=False),
+                },
+                {
+                    "label": _("Credit Limit"),
+                    "fieldname": "credit_limit",
+                    "fieldtype": "Currency",
+                    "options": "currency",
+                    "width": w("Credit Limit"),
+                },
+                {
+                    "label": _("Guarantee Cheque"),
+                    "fieldname": "guarantee_cheque",
+                    "fieldtype": "Currency",
+                    "options": "currency",
+                    "width": w("Guarantee Cheque"),
+                },
+                {
+                    "label": _("Customer Group"),
+                    "fieldname": "customer_group",
+                    "fieldtype": "Link",
+                    "options": "Customer Group",
+                    "width": w("Customer Group", currency=False),
+                },
+                {
+                    "label": _("Currency"),
+                    "fieldname": "currency",
+                    "fieldtype": "Link",
+                    "options": "Currency",
+                    "hidden": 1,
+                },
+            ]
+        )
+
+        return cols
+
+    def _get_ageing_labels(self):
+        ranges = [
+            int(x.strip())
+            for x in (self.filters.range or "30, 60, 90, 120").split(",")
+            if x.strip().isdigit()
+        ]
+        labels, prev = [], 0
+        for r in ranges:
+            labels.append(f"{prev}-{r}")
+            prev = r + 1
+        labels.append(f"{prev}+")
+        return labels
+
+    def build_customer_summary(self, data):
+        if not data:
+            return []
+
+        out = {}
+        bucket_count = len(self._get_ageing_labels())
+
+        for row in data:
+            if not isinstance(row, dict) or not row.get("party"):
+                continue
+
+            customer = row["party"]
+            d = out.setdefault(
+                customer,
+                {
+                    "customer": customer,
+                    "currency": row.get("currency"),
+                    "outstanding": 0.0,
+                },
+            )
+
+            d["outstanding"] += flt(row.get("outstanding", 0), 2)
+
+            for i in range(1, bucket_count + 1):
+                key = f"range{i}"
+                d[key] = flt(d.get(key, 0) + flt(row.get(key, 0), 2), 2)
+
+        return list(out.values())
+
+    def enrich_customer_rows(self, rows):
+        if not rows:
+            return
+
+        customers = [r["customer"] for r in rows if r.get("customer")]
+
+        sales_person_map = self.get_sales_person_map(customers)
+        customer_group_map = self.get_customer_group_map(customers)
+        payment_terms_map = self.get_payment_terms_map(customers)
+        future_payment_map = self.get_future_payment_map(customers)
+        unbilled_map = self.get_unbilled_sales_map(customers)
+        opr_prod_map, opr_hold_map = self.get_opr_data_map(customers)
+        guarantee_cheque_map = self.get_guarantee_cheque_map(customers)
+        credit_limit_map = self.get_credit_limit_map(customers)
+
+        for r in rows:
+            customer = r.get("customer")
+            if not customer:
+                continue
+
+            r["sales_person"] = sales_person_map.get(customer, "")
+            r["customer_group"] = customer_group_map.get(customer, "")
+            r["payment_terms"] = payment_terms_map.get(customer, "")
+
+            outstanding = flt(r.get("outstanding", 0), 2)
+            future_payment = flt(future_payment_map.get(customer, 0), 2)
+            unbilled_sales = flt(unbilled_map.get(customer, 0), 2)
+            opr_under_prod = flt(opr_prod_map.get(customer, 0), 2)
+            opr_on_hold = flt(opr_hold_map.get(customer, 0), 2)
+
+            r["future_payment"] = future_payment
+            r["unbilled_sales"] = unbilled_sales
+            r["production_oprs"] = opr_under_prod
+            r["hold_oprs"] = opr_on_hold
+            r["guarantee_cheque"] = flt(guarantee_cheque_map.get(customer, 0), 2)
+            r["credit_limit"] = flt(credit_limit_map.get(customer, 0), 2)
+
+            cheques_required = flt(outstanding - future_payment + unbilled_sales, 2)
+            r["cheques_required"] = cheques_required
+
+            # Total Exposure = Cheques Required + Production OPRs
+            total_exposure = flt(cheques_required + opr_under_prod, 2)
+            r["total_exposure"] = total_exposure
+
+            # Exposure after Hold OPRs = Total Exposure − Hold OPRs
+            r["exposure_after_hold_oprs"] = flt(total_exposure + opr_on_hold, 2)
+
+    def get_sales_person_fieldname(self):
+        """Different sites use different Customer fields for sales person.
+        Detect whichever of these actually exists on this site's Customer doctype."""
+        if not hasattr(self, "_sales_person_fieldname"):
+            candidates = (
+                "sales_person",
+                "primary_sales_person",
+                "custom_primary_sales_person",
+            )
+            meta = frappe.get_meta("Customer")
+            self._sales_person_fieldname = next(
+                (f for f in candidates if meta.has_field(f)), None
+            )
+        return self._sales_person_fieldname
+
+    def get_sales_person_map(self, customers):
+        if not customers:
+            return {}
+
+        fieldname = self.get_sales_person_fieldname()
+        if not fieldname:
+            return {}
+
+        result = frappe.db.sql(
+            f"""
+            SELECT name, `{fieldname}` AS sales_person
+            FROM `tabCustomer`
+            WHERE name IN %(customers)s
+            """,
+            {"customers": customers},
+            as_dict=True,
+        )
+
+        return {row.name: row.sales_person or "" for row in result}
+
+    def get_customer_group_map(self, customers):
+        if not customers:
+            return {}
+
+        result = frappe.db.sql(
+            """
+            SELECT name, customer_group
+            FROM `tabCustomer`
+            WHERE name IN %(customers)s
+            """,
+            {"customers": customers},
+            as_dict=True,
+        )
+        return {row.name: row.customer_group or "" for row in result}
+
+    def get_payment_terms_map(self, customers):
+        if not customers:
+            return {}
+
+        result = frappe.db.sql(
+            """
+            SELECT name, payment_terms
+            FROM `tabCustomer`
+            WHERE name IN %(customers)s
+            """,
+            {"customers": customers},
+            as_dict=True,
+        )
+        return {row.name: row.payment_terms for row in result}
+
+    def get_future_payment_map(self, customers):
+        if not customers:
+            return {}
+
+        params = {
+            "customers": customers,
+            "report_date": self.filters.report_date,
+            "company": self.filters.company,
+        }
+
+        # Use paid_amount on the PE directly so unallocated PDCs are fully captured.
+        pe_rows = frappe.db.sql(
+            """
+            SELECT pe.party, SUM(pe.paid_amount) AS future_amount
+            FROM `tabPayment Entry` pe
+            WHERE pe.docstatus < 2
+              AND pe.payment_type = 'Receive'
+              AND pe.party_type = 'Customer'
+              AND pe.party IN %(customers)s
+              AND pe.posting_date > %(report_date)s
+              AND pe.company = %(company)s
+              AND COALESCE(pe.workflow_state, '') NOT IN ('Cheque Copy', 'Guarantee Cheque')
+            GROUP BY pe.party
+            """,
+            params,
+            as_dict=True,
+        )
+
+        # Journal Entries with future posting dates linked to invoices
+        # (matches standard AR report's get_future_payments_from_journal_entry)
+        je_rows = frappe.db.sql(
+            """
+            SELECT jea.party, SUM(jea.credit_in_account_currency) AS future_amount
+            FROM `tabJournal Entry Account` jea
+            INNER JOIN `tabJournal Entry` je ON je.name = jea.parent
+            WHERE je.docstatus < 2
+              AND je.posting_date > %(report_date)s
+              AND je.company = %(company)s
+              AND jea.party_type = 'Customer'
+              AND jea.party IN %(customers)s
+              AND jea.reference_name IS NOT NULL
+              AND jea.reference_name != ''
+              AND jea.credit_in_account_currency > 0
+            GROUP BY jea.party
+            """,
+            params,
+            as_dict=True,
+        )
+
+        future_map = {row.party: flt(row.future_amount, 2) for row in pe_rows}
+        for row in je_rows:
+            future_map[row.party] = flt(
+                future_map.get(row.party, 0) + flt(row.future_amount, 2), 2
+            )
+
+        return future_map
+
+    def get_guarantee_cheque_map(self, customers):
+        if not customers:
+            return {}
+
+        result = frappe.db.sql(
+            """
+            SELECT pe.party, SUM(pe.paid_amount) AS guarantee_amount
+            FROM `tabPayment Entry` pe
+            WHERE pe.docstatus < 2
+              AND pe.payment_type = 'Receive'
+              AND pe.party_type = 'Customer'
+              AND pe.party IN %(customers)s
+              AND pe.company = %(company)s
+              AND pe.workflow_state = 'Guarantee Cheque'
+            GROUP BY pe.party
+            """,
+            {"customers": customers, "company": self.filters.company},
+            as_dict=True,
+        )
+
+        return {row.party: flt(row.guarantee_amount, 2) for row in result}
+
+    def get_credit_limit_map(self, customers):
+        if not customers:
+            return {}
+
+        result = frappe.db.sql(
+            """
+            SELECT name, approved_credit_limit
+            FROM `tabCustomer`
+            WHERE name IN %(customers)s
+            """,
+            {"customers": customers},
+            as_dict=True,
+        )
+        return {row.name: flt(row.approved_credit_limit or 0, 2) for row in result}
+
+    def get_unbilled_sales_map(self, customers):
+        if not customers:
+            return {}
+
+        result = frappe.db.sql(
+            """
+            SELECT customer, SUM(grand_total) as unbilled_amount
+            FROM `tabDelivery Note`
+            WHERE docstatus = 1
+              AND status = 'To Bill'
+              AND customer IN %(customers)s
+              AND company = %(company)s
+              AND posting_date <= %(report_date)s
+            GROUP BY customer
+            """,
+            {
+                "customers": customers,
+                "company": self.filters.company,
+                "report_date": self.filters.report_date,
+            },
+            as_dict=True,
+        )
+        # grand_total already includes VAT,
+        # consistent with oprs_under_production and oprs_on_hold
+        return {row.customer: flt(row.unbilled_amount or 0, 2) for row in result}
+
+    def get_company_vat(self):
+        """Returns VAT % from Company.custom_vat_ field, defaulting to 0 if unavailable."""
+        try:
+            vat = frappe.db.get_value("Company", self.filters.company, "custom_vat_")
+            return flt(vat or 0, 4)
+        except Exception:
+            return 0.0
+
+    def get_opr_data_map(self, customers):
+        if not customers:
+            return {}, {}
+
+        if not frappe.db.table_exists("Order Processing Request"):
+            return {}, {}
+
+        vat_rate = self.get_company_vat()
+        vat_multiplier = 1 + vat_rate / 100
+
+        opr_params = {"customers": customers, "company": self.filters.company}
+        opr_has_company = bool(
+            frappe.db.sql(
+                "SHOW COLUMNS FROM `tabOrder Processing Request` LIKE 'company'"
+            )
+        )
+        company_condition = "AND company = %(company)s" if opr_has_company else ""
+
+        prod_result = frappe.db.sql(
+            f"""
+            SELECT customer_name, SUM(remaining_value) as production_value
+            FROM `tabOrder Processing Request`
+            WHERE docstatus != 2
+              AND remaining_value > 0
+              AND customer_name IN %(customers)s
+              {company_condition}
+              AND workflow_state LIKE '%%Production%%'
+              AND workflow_state NOT LIKE '%%Hold%%'
+            GROUP BY customer_name
+            """,
+            opr_params,
+            as_dict=True,
+        )
+
+        hold_result = frappe.db.sql(
+            f"""
+            SELECT customer_name, SUM(remaining_value) as hold_value
+            FROM `tabOrder Processing Request`
+            WHERE docstatus != 2
+              AND remaining_value > 0
+              AND customer_name IN %(customers)s
+              {company_condition}
+              AND workflow_state LIKE '%%Hold%%'
+            GROUP BY customer_name
+            """,
+            opr_params,
+            as_dict=True,
+        )
+
+        production_map = {
+            row.customer_name: flt((row.production_value or 0) * vat_multiplier, 2)
+            for row in prod_result
+        }
+        hold_map = {
+            row.customer_name: flt((row.hold_value or 0) * vat_multiplier, 2)
+            for row in hold_result
+        }
+
+        return production_map, hold_map
+
+    def get_opr_only_customers(self, existing_customers):
+        """Returns customers with active OPRs who have no outstanding invoices."""
+        if not frappe.db.table_exists("Order Processing Request"):
+            return []
+
+        opr_has_company = bool(
+            frappe.db.sql(
+                "SHOW COLUMNS FROM `tabOrder Processing Request` LIKE 'company'"
+            )
+        )
+
+        conditions = " AND company = %(company)s" if opr_has_company else ""
+        params = {"company": self.filters.company}
+
+        if self.filters.get("customer_group"):
+            groups = get_customer_group_with_children(self.filters.customer_group)
+            group_customers = frappe.get_all(
+                "Customer",
+                filters={"customer_group": ["in", groups]},
+                pluck="name",
+            )
+
+            if not group_customers:
+                return []
+
+            conditions += " AND customer_name IN %(group_customers)s"
+            params["group_customers"] = group_customers
+
+        if self.filters.get("sales_person"):
+            fieldname = self.get_sales_person_fieldname()
+            sp_customers = (
+                frappe.get_all(
+                    "Customer",
+                    filters={fieldname: self.filters.sales_person},
+                    pluck="name",
+                )
+                if fieldname
+                else []
+            )
+
+            if not sp_customers:
+                return []
+
+            conditions += " AND customer_name IN %(sp_customers)s"
+            params["sp_customers"] = sp_customers
+
+        if self.filters.get("customer"):
+            conditions += " AND customer_name = %(customer)s"
+            params["customer"] = self.filters.customer
+
+        result = frappe.db.sql(
+            f"""
+            SELECT DISTINCT customer_name
+            FROM `tabOrder Processing Request`
+            WHERE docstatus != 2
+              AND remaining_value > 0
+              {conditions}
+            """,
+            params,
+            as_dict=True,
+        )
+
+        return [
+            row.customer_name
+            for row in result
+            if row.customer_name and row.customer_name not in existing_customers
+        ]
+
+    def get_unbilled_only_customers(self, existing_customers):
+        """Return customers with submitted 'To Bill' Delivery Notes but not yet
+        in the report (no AR outstanding and not already added via OPRs)."""
+        params = {
+            "company": self.filters.company,
+            "report_date": self.filters.report_date,
+        }
+        conditions = ""
+
+        if self.filters.get("customer_group"):
+            groups = get_customer_group_with_children(self.filters.customer_group)
+            group_customers = frappe.get_all(
+                "Customer",
+                filters={"customer_group": ["in", groups]},
+                pluck="name",
+            )
+            if not group_customers:
+                return []
+            conditions += " AND customer IN %(group_customers)s"
+            params["group_customers"] = tuple(group_customers)
+
+        if self.filters.get("sales_person"):
+            fieldname = self.get_sales_person_fieldname()
+            sp_customers = (
+                frappe.get_all(
+                    "Customer",
+                    filters={fieldname: self.filters.sales_person},
+                    pluck="name",
+                )
+                if fieldname
+                else []
+            )
+            if not sp_customers:
+                return []
+            conditions += " AND customer IN %(sp_customers)s"
+            params["sp_customers"] = tuple(sp_customers)
+
+        if self.filters.get("customer"):
+            conditions += " AND customer = %(customer)s"
+            params["customer"] = self.filters.customer
+
+        result = frappe.db.sql(
+            f"""
+            SELECT DISTINCT customer
+            FROM `tabDelivery Note`
+            WHERE docstatus = 1
+              AND status = 'To Bill'
+              AND company = %(company)s
+              AND posting_date <= %(report_date)s
+              {conditions}
+            """,
+            params,
+            as_dict=True,
+        )
+
+        return [
+            row.customer
+            for row in result
+            if row.customer and row.customer not in existing_customers
+        ]
+
+
+def get_customer_group_with_children(customer_group):
+    if not customer_group:
+        return []
+
+    lft, rgt = frappe.db.get_value("Customer Group", customer_group, ["lft", "rgt"])
+    return frappe.get_all(
+        "Customer Group",
+        filters={"lft": [">=", lft], "rgt": ["<=", rgt]},
+        pluck="name",
+    )
+
+
+@frappe.whitelist()
+def download_excel_report(filters):
+    """Generate a formatted Excel export of the AR Exposure Summary report."""
+    import openpyxl
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    if isinstance(filters, str):
+        filters = frappe._dict(json.loads(filters))
+    elif isinstance(filters, dict):
+        filters = frappe._dict(filters)
+
+    args = {
+        "account_type": "Receivable",
+        "naming_by": ["Selling Settings", "cust_master_name"],
+    }
+    report = CustomARExposureSummary(filters)
+    columns, data, *_ = report.run(args)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "AR Exposure Summary"
+
+    fieldnames = [col["fieldname"] for col in columns]
+    headers = [col["label"] for col in columns]
+    currency_fields = {
+        col["fieldname"] for col in columns if col.get("fieldtype") == "Currency"
+    }
+    hidden_fields = {col["fieldname"] for col in columns if col.get("hidden")}
+
+    # Filter out hidden columns for export
+    visible_indices = [
+        i for i, col in enumerate(columns) if col["fieldname"] not in hidden_fields
+    ]
+    visible_headers = [headers[i] for i in visible_indices]
+    visible_fieldnames = [fieldnames[i] for i in visible_indices]
+
+    header_font = Font(bold=True, size=10)
+    header_fill = PatternFill(
+        start_color="BDD7EE", end_color="BDD7EE", fill_type="solid"
+    )
+    header_align = Alignment(wrap_text=True, horizontal="center", vertical="center")
+    right_align = Alignment(horizontal="right", vertical="center")
+    left_align = Alignment(horizontal="left", vertical="center")
+
+    # Write and style header row
+    ws.append(visible_headers)
+    ws.row_dimensions[1].height = 40
+    for col_idx, cell in enumerate(ws[1], 1):
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+
+    # Write data rows
+    for row_data in data:
+        row_values = []
+        for fn in visible_fieldnames:
+            val = row_data.get(fn)
+            if fn in currency_fields and val is not None:
+                row_values.append(flt(val, 2))
+            else:
+                row_values.append(val if val is not None else "")
+        ws.append(row_values)
+
+    # Align data cells and track max column widths
+    col_widths = [len(str(h)) + 2 for h in visible_headers]
+    for row in ws.iter_rows(min_row=2):
+        for col_idx, cell in enumerate(row):
+            fn = (
+                visible_fieldnames[col_idx] if col_idx < len(visible_fieldnames) else ""
+            )
+            cell.alignment = right_align if fn in currency_fields else left_align
+            if cell.value is not None:
+                col_widths[col_idx] = max(col_widths[col_idx], len(str(cell.value)) + 2)
+
+    # Apply auto-adjusted column widths (capped at 40)
+    for col_idx, width in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(width, 40)
+
+    # Freeze panes: lock header row and first 2 columns (Customer, Sales Person)
+    # Customer Group is now the last visible column, so only 2 data cols frozen
+    ws.freeze_panes = "C2"
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    frappe.local.response.filecontent = output.read()
+    frappe.local.response.type = "download"
+    frappe.local.response.filename = "AR_Exposure_Summary.xlsx"

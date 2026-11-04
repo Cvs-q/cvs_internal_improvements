@@ -1,0 +1,336 @@
+<style>
+	.print-format {
+		margin-left: 3mm;
+		margin-right: 3mm;
+		/* Read by Frappe as the PDF bottom page margin - this is the space the letterhead
+		   footer (repeated on every page via #footer-html) is drawn into. */
+		margin-bottom: 38mm;
+		padding: 2mm 4mm;
+		font-size: 8.0pt !important;
+	}
+	.print-format table {
+		width: 100%;
+		table-layout: fixed;
+	}
+	.print-format thead th {
+		text-align: center;
+		word-wrap: break-word;
+		overflow-wrap: break-word;
+	}
+	.print-format td, .print-format tbody th {
+		vertical-align: middle !important;
+		word-wrap: break-word;
+		overflow-wrap: break-word;
+	}
+	.cvs-footer, .cvs-footer td, .cvs-footer th {
+		background-color: #f4f5f6 !important;
+		font-weight: bold;
+	}
+	/* Dates, references and amounts must stay on one line - tighter side padding gives them room */
+	.print-format td.soa-nowrap, .print-format th.soa-nowrap {
+		white-space: nowrap;
+		word-wrap: normal;
+		overflow-wrap: normal;
+		padding-left: 3px !important;
+		padding-right: 3px !important;
+	}
+	.print-format td.soa-tight {
+		padding-left: 3px !important;
+		padding-right: 3px !important;
+	}
+	/* Portrait: a 14mm Date column only fits "dd-mm-yyyy" at a slightly smaller font and tighter padding */
+	.print-format:not(.landscape) td.soa-date {
+		font-size: 6.3pt;
+		padding-left: 1.5px !important;
+		padding-right: 1.5px !important;
+	}
+	/* Portrait has ~30% less width than landscape - a slightly smaller font keeps dates and
+	   amounts (including the bold Total row) on one line there. Landscape is unchanged. */
+	.print-format:not(.landscape) table {
+		font-size: 7.5pt;
+	}
+	/* Detail table column widths. Set per orientation because portrait has ~30% less width
+	   and a smaller font: Date is sized to just fit dd-mm-yyyy, amounts to fit 7-digit totals. */
+	.print-format.landscape .soa-pw col.soa-c-date { width: 7%; }
+	.print-format.landscape .soa-pw col.soa-c-project { width: 18%; }
+	.print-format.landscape .soa-pw col.soa-c-age { width: 5%; }
+	.print-format.landscape .soa-pw col.soa-c-ref { width: 9%; }
+	.print-format.landscape .soa-pw col.soa-c-amt { width: 10%; }
+	.print-format.landscape .soa-pw col.soa-c-lpo { width: 12%; }
+	.print-format.landscape .soa-pw col.soa-c-pdcref { width: 9%; }
+	.print-format.landscape .soa-wp col.soa-c-date { width: 7%; }
+	.print-format.landscape .soa-wp col.soa-c-age { width: 5%; }
+	.print-format.landscape .soa-wp col.soa-c-ref { width: 12%; }
+	.print-format.landscape .soa-wp col.soa-c-amt { width: 11%; }
+	.print-format.landscape .soa-wp col.soa-c-lpo { width: 18%; }
+	.print-format.landscape .soa-wp col.soa-c-pdcref { width: 14%; }
+	.print-format:not(.landscape) .soa-pw col.soa-c-date { width: 7.3%; } /* 14mm of the ~192mm portrait table */
+	.print-format:not(.landscape) .soa-pw col.soa-c-project { width: 12.2%; }
+	.print-format:not(.landscape) .soa-pw col.soa-c-age { width: 5%; }
+	.print-format:not(.landscape) .soa-pw col.soa-c-ref { width: 9%; }
+	.print-format:not(.landscape) .soa-pw col.soa-c-amt { width: 11.5%; }
+	.print-format:not(.landscape) .soa-pw col.soa-c-lpo { width: 10%; }
+	.print-format:not(.landscape) .soa-pw col.soa-c-pdcref { width: 10.5%; }
+	.print-format:not(.landscape) .soa-wp col.soa-c-date { width: 7.3%; } /* 14mm */
+	.print-format:not(.landscape) .soa-wp col.soa-c-age { width: 5%; }
+	.print-format:not(.landscape) .soa-wp col.soa-c-ref { width: 10%; }
+	.print-format:not(.landscape) .soa-wp col.soa-c-amt { width: 13%; }
+	.print-format:not(.landscape) .soa-wp col.soa-c-lpo { width: 15.1%; }
+	.print-format:not(.landscape) .soa-wp col.soa-c-pdcref { width: 10.6%; }
+	/* No PDC/LC on the statement: the last 3 columns are dropped, so Project and LPO absorb their width */
+	.print-format.landscape .soa-pw.soa-nopdc col.soa-c-project { width: 40%; }
+	.print-format.landscape .soa-pw.soa-nopdc col.soa-c-lpo { width: 19%; }
+	.print-format:not(.landscape) .soa-pw.soa-nopdc col.soa-c-project { width: 40%; }
+	.print-format:not(.landscape) .soa-pw.soa-nopdc col.soa-c-lpo { width: 15%; }
+	/* Frappe only reads the exact ".print-format" rule above for PDF page margins; as a plain
+	   CSS margin that 38mm would also pad the repeating header/footer pages (growing the
+	   header after page 1 and re-flowing rows twice) and push a blank page after the report. */
+	div.print-format {
+		margin-bottom: 0 !important;
+	}
+	/* Letterhead footer, scaled (aspect ratio kept) so it always fits the reserved margin */
+	.letter-head-footer img {
+		max-width: 100%;
+		max-height: 27mm;
+		width: auto;
+		height: auto !important;
+	}
+	</style>
+
+	<h2 class="text-center" style="margin: 0; font-weight: bold;">
+		{%= __(report.report_name) %}
+		{%= __("as of") %}
+		{%= frappe.datetime.str_to_user(filters.report_date) %}
+	</h2>
+
+	{% var customer_names = {};
+		var customer_order = [];
+		data.forEach(function(d) {
+			if (!d || !d["party"]) return;
+			if (customer_order.indexOf(d["party"]) === -1) customer_order.push(d["party"]);
+			if (d["customer_name"]) customer_names[d["party"]] = d["customer_name"];
+		});
+		if (!customer_order.length && filters.party) customer_order = [].concat(filters.party);
+	%}
+	<h4 class="text-center">
+		{% if (filters.party) { %}
+			{%= customer_order.map(function(p) { return customer_names[p] || p; }).join(", ") %}
+		{% } %}
+	</h4>
+	<h6 class="text-center">
+			{% if (filters.tax_id) { %}
+			{%= __("Tax Id: ")%}	{%= filters.tax_id %}
+			{% } %}
+	</h6>
+
+	<div class="clearfix">
+		<div class="pull-left">
+		{% if(filters.payment_terms) { %}
+			<strong>{%= __("Payment Terms") %}:</strong> {%= filters.payment_terms %}
+		{% } %}
+		</div>
+		<div class="pull-right">
+		{% if(filters.credit_limit) { %}
+			<strong>{%= __("Credit Limit") %}:</strong> {%= format_currency(filters.credit_limit) %}
+		{% } %}
+		</div>
+	</div>
+
+	{% var is_without_project = filters.report_type === "Without Project";
+		var range_col = function(fieldname) {
+			var col = report.columns.filter((elem) => (elem.fieldname == fieldname))[0];
+			return col ? col.label : fieldname;
+		};
+		var all_rows = data.filter(function(d) { return d && d["voucher_no"] && !d["is_total_row"]; });
+		var pdc_entry_rows = all_rows.filter(function(d) { return d["is_unallocated_pdc"]; });
+		var range_fields = ['range1', 'range2', 'range3', 'range4', 'range5'];
+		var bucket_labels = range_fields.map(range_col);
+		var project_groups = {};
+		var project_order = [];
+		var grand_outstanding = [0, 0, 0, 0, 0];
+		var grand_pdc = [0, 0, 0, 0, 0];
+		var grand_remaining = [0, 0, 0, 0, 0];
+		var unallocated_pdc = pdc_entry_rows.reduce(function(sum, row) { return sum + flt(row["future_amount"]); }, 0);
+		var has_pdc = all_rows.some(function(d) { return flt(d["future_amount"]) !== 0; });
+		var soa_currency = all_rows.length ? all_rows[0]["currency"] : (data[0] ? data[0]["currency"] : "");
+
+		all_rows.forEach(function(row) {
+			var project = row["project"] || __("(Not Specified)");
+			if (!project_groups[project]) {
+				project_groups[project] = [0, 0, 0, 0, 0];
+				project_order.push(project);
+			}
+			range_fields.forEach(function(fieldname, idx) {
+				var val = flt(row[fieldname]);
+				if (val) {
+					project_groups[project][idx] += val;
+					grand_outstanding[idx] += val;
+					grand_pdc[idx] += flt(row["future_amount"]);
+					grand_remaining[idx] += flt(row["remaining_balance"]);
+				}
+			});
+		});
+
+		var sum_row = function(vals) {
+			return vals.reduce(function(a, b) { return a + b; }, 0);
+		};
+		var fmt_acc = function(v, currency) {
+			v = flt(v);
+			var formatted = format_currency(Math.abs(v), currency);
+			return v < 0 ? "(" + formatted + ")" : formatted;
+		};
+	%}
+
+	<table class="table table-bordered table-condensed">
+		<colgroup>
+			<col style="width: 24%;">
+			<col style="width: 12%;">
+			<col style="width: 12%;">
+			<col style="width: 12%;">
+			<col style="width: 12%;">
+			<col style="width: 12%;">
+			<col style="width: 16%;">
+		</colgroup>
+		<thead>
+			<tr>
+				<th></th>
+				{% bucket_labels.forEach(function(label) { %}
+					<th class="text-right">{%= __(label) %}</th>
+				{% }); %}
+				<th class="text-right">{%= __("Total") %}</th>
+			</tr>
+		</thead>
+		<tbody>
+			{% if(!is_without_project) { %}
+				{% project_order.forEach(function(project) {
+					var vals = project_groups[project];
+				%}
+					<tr>
+						<td>{%= project %}</td>
+						{% vals.forEach(function(v) { %}
+							<td class="text-right">{%= fmt_acc(v, soa_currency) %}</td>
+						{% }); %}
+						<td class="text-right"><b>{%= fmt_acc(sum_row(vals), soa_currency) %}</b></td>
+					</tr>
+				{% }); %}
+			{% } %}
+			{% if(is_without_project) { %}
+				<tr>
+					<td>{%= __("Total Outstanding") %}</td>
+					{% grand_outstanding.forEach(function(v) { %}
+						<td class="text-right">{%= fmt_acc(v, soa_currency) %}</td>
+					{% }); %}
+					<td class="text-right">{%= fmt_acc(sum_row(grand_outstanding), soa_currency) %}</td>
+				</tr>
+			{% } else { %}
+				<tr class="cvs-footer">
+					<th class="text-left">{%= __("Total Outstanding") %}</th>
+					{% grand_outstanding.forEach(function(v) { %}
+						<th class="text-right">{%= fmt_acc(v, soa_currency) %}</th>
+					{% }); %}
+					<th class="text-right">{%= fmt_acc(sum_row(grand_outstanding), soa_currency) %}</th>
+				</tr>
+			{% } %}
+			<tr>
+				<td>{%= __("PDC/LC in Hand") %}</td>
+				<td colspan="5"></td>
+				<td class="text-right">{%= fmt_acc(sum_row(grand_pdc) + unallocated_pdc, soa_currency) %}</td>
+			</tr>
+			<tr class="cvs-footer">
+				<th class="text-left">{%= __("Remaining Balance") %}</th>
+				<th colspan="5"></th>
+				<th class="text-right">{%= fmt_acc(sum_row(grand_remaining) - unallocated_pdc, soa_currency) %}</th>
+			</tr>
+		</tbody>
+	</table>
+
+	<table class="table table-bordered {%= is_without_project ? "soa-wp" : "soa-pw" %}{%= has_pdc ? "" : " soa-nopdc" %}">
+		<colgroup>
+			<col class="soa-c-date">
+			{% if(!is_without_project) { %}
+				<col class="soa-c-project">
+			{% } %}
+			<col class="soa-c-age">
+			<col class="soa-c-ref">
+			<col class="soa-c-amt">
+			<col class="soa-c-amt">
+			<col class="soa-c-lpo">
+			{% if(has_pdc) { %}
+				<col class="soa-c-pdcref">
+				<col class="soa-c-amt">
+				<col class="soa-c-amt">
+			{% } %}
+		</colgroup>
+		<thead>
+			<tr>
+				<th>{%= __("Date") %}</th>
+				{% if(!is_without_project) { %}
+					<th>{%= __("Project") %}</th>
+				{% } %}
+				<th class="soa-nowrap" style="white-space: normal;">{%= __("Age (Days)") %}</th>
+				<th>{%= __("Reference") %}</th>
+				<th>{%= __("Invoiced Amount") %}</th>
+				<th>{%= __("Outstanding Amount") %}</th>
+				<th>{%= __("Customer LPO No.") %}</th>
+				{% if(has_pdc) { %}
+					<th>{%= __("PDC/LC Ref") %}</th>
+					<th>{%= __("PDC/LC Amount") %}</th>
+					<th>{%= __("Remaining Balance") %}</th>
+				{% } %}
+			</tr>
+		</thead>
+		<div class="show-filters">
+			{% if subtitle %}
+				{{ subtitle }}
+				<hr>
+			{% endif %}
+		</div>
+		<tbody>
+			{% for(var i=0, l=data.length; i<l; i++) { %}
+				{% if(data[i]["party"]) { %}
+				<tr>
+					<td class="soa-nowrap soa-date">{%= frappe.datetime.str_to_user(data[i]["posting_date"]) %}</td>
+					{% if(!is_without_project) { %}
+						<td class="soa-tight">{%= data[i]["project"] || "" %}</td>
+					{% } %}
+					<td class="soa-nowrap">{%= data[i]["age"] %}</td>
+					<td class="soa-nowrap">{%= data[i]["voucher_no"] %}</td>
+
+					<td class="soa-nowrap" style="text-align: right">
+						{%= fmt_acc(data[i]["invoiced"], data[i]["currency"]) %}</td>
+					<td class="soa-nowrap" style="text-align: right">
+						{%= fmt_acc(data[i]["outstanding"], data[i]["currency"]) %}</td>
+
+					<td class="soa-tight">{%= data[i]["po_no"] %}</td>
+					{% if(has_pdc) { %}
+						<td class="soa-tight">{%= data[i]["future_ref"] %}</td>
+						<td class="soa-nowrap" style="text-align: right">{%= fmt_acc(data[i]["future_amount"], data[i]["currency"]) %}</td>
+						<td class="soa-nowrap" style="text-align: right">{%= fmt_acc(data[i]["remaining_balance"], data[i]["currency"]) %}</td>
+					{% } %}
+				</tr>
+				{% } else { %}
+				<tr class="cvs-footer">
+					<td></td>
+					{% if(!is_without_project) { %}
+						<td></td>
+					{% } %}
+					<td></td>
+					<td style="text-align: right"><b>{%= __("Total") %}</b></td>
+					<td class="soa-nowrap" style="text-align: right">
+						<b>{%= fmt_acc(data[i]["invoiced"], data[i]["currency"]) %}</b></td>
+					<td class="soa-nowrap" style="text-align: right">
+						<b>{%= fmt_acc(data[i]["outstanding"], data[i]["currency"]) %}</b></td>
+
+					<td style="text-align: right"></td>
+					{% if(has_pdc) { %}
+						<td style="text-align: right"></td>
+						<td class="soa-nowrap" style="text-align: right"><b>{%= fmt_acc(data[i]["future_amount"], data[i]["currency"]) %}</b></td>
+						<td class="soa-nowrap" style="text-align: right"><b>{%= fmt_acc(data[i]["remaining_balance"], data[i]["currency"]) %}</b></td>
+					{% } %}
+				</tr>
+				{% } %}
+			{% } %}
+		</tbody>
+	</table>
+
+	<p class="text-right text-muted">{%= __("Printed on {0}", [frappe.datetime.str_to_user(frappe.datetime.get_datetime_as_string())]) %}</p>

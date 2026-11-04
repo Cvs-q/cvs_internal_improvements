@@ -1,0 +1,200 @@
+frappe.ui.form.on("CVS Stock Entry Import", {
+	setup(frm) {
+		frm.set_query("cvs_setting", () => ({
+			filters: frm.doc.company ? { company: frm.doc.company } : {},
+		}));
+		frm.set_query("item_code", "items", (doc, cdt, cdn) => ({
+			query: "cvs_internal_improvements.cvs_internal_improvements.doctype.cvs_stock_entry_import.cvs_stock_entry_import.item_query",
+			filters: { is_stock_item: 1, suggested: locals[cdt][cdn].suggested_items || "" },
+		}));
+		frm.set_query("source_warehouse", () => ({
+			filters: { company: frm.doc.company, is_group: 0, disabled: 0 },
+		}));
+		frm.set_query("batch_no", "items", (doc, cdt, cdn) => ({
+			filters: { item: locals[cdt][cdn].item_code, disabled: 0 },
+		}));
+	},
+
+	refresh(frm) {
+		if (frm.doc.docstatus === 0 && (frm.doc.items || []).length && !frm.doc.generated_stock_entry) {
+			frm.add_custom_button(__("Match Again"), () => match_again(frm), __("Actions"));
+		}
+	},
+
+	onload(frm) {
+		if (frm.is_new()) set_default_warehouse(frm);
+	},
+
+	company(frm) {
+		set_default_warehouse(frm);
+	},
+
+	cvs_setting(frm) {
+		if (!frm.doc.cvs_setting) return;
+		frappe.db.get_value("CVS Stock Entry Import Setting", frm.doc.cvs_setting, "company").then(({ message }) => {
+			if (message.company && !frm.doc.company) frm.set_value("company", message.company);
+			set_default_warehouse(frm);
+		});
+	},
+
+	extract_data(frm) {
+		const run = () =>
+			save_if_needed(frm)
+				.then(() =>
+					frm.call({
+						method: "extract_data",
+						doc: frm.doc,
+						freeze: true,
+						freeze_message: __("Extracting data with AI..."),
+					})
+				)
+				.then(({ message }) => {
+					if (!message) return;
+					if (message.date_unreadable) {
+						frappe.msgprint(__("The date on the document could not be read. Please enter the Posting Date."));
+					}
+					if (message.opr_not_found) {
+						frappe.msgprint({
+							title: __("OPR Not Found"),
+							message: __(
+								"The OPR number extracted from the document ({0}) is not in the Order Processing Request list. Please select the correct OPR.",
+								[frappe.utils.escape_html(message.opr_not_found)]
+							),
+							indicator: "orange",
+						});
+					}
+					if (message.batch_unmatched) {
+						frappe.msgprint({
+							title: __("Batch Not Found"),
+							message: __(
+								"{0} row(s) have a Batch ID written on the document that was not found for the matched Item, so Batch No was left empty. Check the Batch ID in the row details and select the Batch No.",
+								[message.batch_unmatched]
+							),
+							indicator: "orange",
+						});
+					}
+					frappe.show_alert({
+						message: message.needs_review
+							? __("{0} item(s) extracted, {1} need review.", [message.rows, message.needs_review])
+							: __("{0} item(s) extracted.", [message.rows]),
+						indicator: message.needs_review ? "orange" : "green",
+					});
+				});
+
+		if ((frm.doc.items || []).length) {
+			frappe.confirm(__("Re-extracting will replace the current items. Continue?"), run);
+		} else {
+			run();
+		}
+	},
+
+	generate_stock_entry(frm) {
+		frappe.confirm(__("Create a Draft Stock Entry (Material Issue) from this document?"), () =>
+			generate(frm, 0)
+		);
+	},
+});
+
+// Rows still marked "Possible Match" are only the system's best guess, so the user must accept them
+// explicitly before a Stock Entry is created from them.
+function generate(frm, confirm_uncertain) {
+	save_if_needed(frm)
+		.then(() =>
+			frm.call({
+				method: "generate_stock_entry",
+				doc: frm.doc,
+				args: { confirm_uncertain },
+				freeze: true,
+				freeze_message: __("Creating Stock Entry..."),
+			})
+		)
+		.then(({ message }) => {
+			if (!message) return;
+			if (message.needs_confirmation) {
+				const rows = message.needs_confirmation
+					.map(
+						(r) =>
+							`<li><b>${__("Row {0}", [r.idx])}</b>: ${frappe.utils.escape_html(r.description || "")} &rarr; ` +
+							`${frappe.utils.escape_html(r.item_code)} (${frappe.utils.escape_html(r.item_name || "")})<br>` +
+							`<small class="text-muted">${frappe.utils.escape_html(r.notes || "")}</small></li>`
+					)
+					.join("");
+				frappe.confirm(
+					__("These rows are only possible matches. Please confirm each Item is correct:") +
+						`<ul style="margin-top: 8px">${rows}</ul>`,
+					() => generate(frm, 1)
+				);
+				return;
+			}
+			if (message.warnings.length) {
+				frappe.msgprint({ title: __("Please Review"), message: message.warnings.join("<br>"), indicator: "orange" });
+			}
+			frappe.show_alert({
+				message: __("Stock Entry {0} created.", [frappe.utils.get_form_link("Stock Entry", message.stock_entry, true)]),
+				indicator: "green",
+			});
+		});
+}
+
+function match_again(frm) {
+	save_if_needed(frm)
+		.then(() =>
+			frm.call({
+				method: "match_again",
+				doc: frm.doc,
+				freeze: true,
+				freeze_message: __("Matching Items..."),
+			})
+		)
+		.then(({ message }) => {
+			if (!message) return;
+			frappe.show_alert({
+				message: message.needs_review
+					? __("{0} row(s) matched again, {1} need review.", [message.rows, message.needs_review])
+					: __("{0} row(s) matched again.", [message.rows]),
+				indicator: message.needs_review ? "orange" : "green",
+			});
+		});
+}
+
+frappe.ui.form.on("CVS Stock Entry Import Item", {
+	item_code(frm, cdt, cdn) {
+		const row = locals[cdt][cdn];
+		if (!row.item_code) {
+			frappe.model.set_value(cdt, cdn, { item_name: "", stock_uom: "" });
+			return;
+		}
+		frappe.db.get_value("Item", row.item_code, ["item_name", "stock_uom"]).then(({ message }) => {
+			frappe.model.set_value(cdt, cdn, {
+				item_name: message.item_name,
+				stock_uom: message.stock_uom,
+				match_status: "Manual Selection",
+				match_confidence: 100,
+				match_notes: __("Item Code selected manually."),
+			});
+		});
+		// The alias for this selection is saved by the server when the document is saved.
+	},
+});
+
+// Source Warehouse comes from the AI Setting or Stock Settings > Default Warehouse, but a warehouse the
+// user picked themselves is never replaced.
+function set_default_warehouse(frm) {
+	if (frm.doc.generated_stock_entry || !frm.doc.company) return;
+	if (frm.doc.source_warehouse && frm.doc.source_warehouse !== frm.auto_warehouse) return;
+	frappe
+		.call({
+			method: "cvs_internal_improvements.cvs_internal_improvements.doctype.cvs_stock_entry_import.cvs_stock_entry_import.get_default_warehouse",
+			args: { company: frm.doc.company, cvs_setting: frm.doc.cvs_setting || "" },
+		})
+		.then(({ message }) => {
+			if (message && message !== frm.doc.source_warehouse) {
+				frm.auto_warehouse = message;
+				frm.set_value("source_warehouse", message);
+			}
+		});
+}
+
+function save_if_needed(frm) {
+	return frm.is_new() || frm.is_dirty() ? frm.save() : Promise.resolve();
+}
