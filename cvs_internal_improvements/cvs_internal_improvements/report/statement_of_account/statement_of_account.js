@@ -114,10 +114,10 @@ erpnext.utils.add_dimensions("Statement of Account", 5);
 					fieldname: "orientation",
 					label: __("Orientation"),
 					options: [
-						{ value: "Landscape", label: __("Landscape") },
 						{ value: "Portrait", label: __("Portrait") },
+						{ value: "Landscape", label: __("Landscape") },
 					],
-					default: "Landscape",
+					default: "Portrait",
 				},
 			],
 			async function (dialog_data) {
