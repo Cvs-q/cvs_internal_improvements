@@ -1,1 +1,12 @@
-License: CVS
+Copyright (c) 2026 CVS. All rights reserved.
+
+CVS Internal Improvements was developed by Iftikhar Hussain Syed
+(iftikhar.hussain@cvshvac.com) for internal use at CVS.
+
+This software is proprietary. It may not be copied, distributed, sublicensed
+or used outside CVS without written permission.
+
+Parts of the CVS Stock Ledger and CVS Stock Balance Quantity reports are
+derived from ERPNext (Copyright (c) Frappe Technologies Pvt. Ltd.), which is
+licensed under the GNU General Public License v3. Those parts remain subject
+to that license.
