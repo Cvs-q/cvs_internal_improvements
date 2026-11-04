@@ -11,11 +11,11 @@ from unittest.mock import patch
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from cvs_internal_improvements.cvs_internal_improvements import item_matcher as m
+from cvs_internal_improvements.cvs_internal_improvements.stock_entry_import import item_matcher as m
 from cvs_internal_improvements.cvs_internal_improvements.doctype.cvs_stock_entry_import.cvs_stock_entry_import import (
 	get_default_warehouse,
 )
-from cvs_internal_improvements.cvs_internal_improvements.stock_entry_extract import _normalize, _quantity
+from cvs_internal_improvements.cvs_internal_improvements.stock_entry_import.extract import _normalize, _quantity
 
 
 def item(code, name, stock_uom="Ton", brand=None):

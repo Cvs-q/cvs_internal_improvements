@@ -81,7 +81,7 @@ frappe.ui.form.on("Cvs Invoice Tool", {
 
         frappe.call({
           method:
-            "cvs_internal_improvements.cvs_internal_improvements.invoice_extract.extract_invoice_with_vision",
+            "cvs_internal_improvements.cvs_internal_improvements.invoice_tool.extract.extract_invoice_with_vision",
           args: {
             pdf_path: frm.doc.invoice_file,
             company_doctype: "Company",

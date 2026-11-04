@@ -6,8 +6,8 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, flt, getdate
 
-from cvs_internal_improvements.cvs_internal_improvements import item_matcher
-from cvs_internal_improvements.cvs_internal_improvements.stock_entry_extract import extract_document
+from cvs_internal_improvements.cvs_internal_improvements.stock_entry_import import item_matcher
+from cvs_internal_improvements.cvs_internal_improvements.stock_entry_import.extract import extract_document
 
 REVIEW_STATUSES = ("Possible Match", "Multiple Matches", "No Match")
 

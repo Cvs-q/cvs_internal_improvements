@@ -6,7 +6,7 @@ frappe.ui.form.on('GPT Setting', {
         if(frm.doc.name.startsWith("new")){
             frappe.call(
                 {
-                    method: "cvs_internal_improvements.cvs_internal_improvements.invoice_extract.getSiteName",
+                    method: "cvs_internal_improvements.cvs_internal_improvements.invoice_tool.extract.getSiteName",
                     callback: function(response) {
                     let res_json=JSON.parse(response.message);
                     if(res_json["status"]){
