@@ -22,7 +22,7 @@
     },
     {
       "fieldname": "gpt_key",
-      "fieldtype": "Data",
+      "fieldtype": "Password",
       "label": "GPT API Key",
       "reqd": 1,
       "length": 200

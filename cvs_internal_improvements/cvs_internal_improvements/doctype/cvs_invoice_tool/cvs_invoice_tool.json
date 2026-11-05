@@ -1,7 +1,7 @@
 {
     "actions": [],
     "allow_rename": 1,
-    "autoname": "format:GPT-Invoice-{YYYY}-{######}",
+    "autoname": "format:CVS-Invoice-{YY}-{######}",
     "creation": "2026-01-04 08:21:51.076540",
     "doctype": "DocType",
     "editable_grid": 1,

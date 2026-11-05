@@ -22,8 +22,9 @@ _AMOUNT_TOLERANCE_ABS = 0.50    # absolute floor for tiny invoices
 # ===================================================
 
 def get_openai_client(account_name):
-    api_key = frappe.db.get_value("GPT Setting", account_name, "gpt_key")
-    model = frappe.db.get_value("GPT Setting", account_name, "gpt_model")
+    setting = frappe.get_doc("GPT Setting", account_name)
+    api_key = setting.get_password("gpt_key", raise_exception=False)
+    model = setting.gpt_model
 
     if not api_key or not model:
         frappe.throw(_("OpenAI API key or model not configured"))
