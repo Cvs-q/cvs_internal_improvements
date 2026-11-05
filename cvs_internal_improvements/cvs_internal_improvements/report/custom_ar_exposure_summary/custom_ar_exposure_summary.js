@@ -181,10 +181,6 @@ function show_exposure_summary(report) {
 				<tr><td><b>${__("Unbilled Sales")}</b></td><td class="text-right">${fmt(sum("unbilled_sales"))}</td></tr>
 				<tr><td><b>${__("Cheques Required")}</b></td><td class="text-right">${fmt(sum("cheques_required"))}</td></tr>
 				<tr><td><b>${__("Production OPRs")}</b></td><td class="text-right">${fmt(sum("production_oprs"))}</td></tr>
-				<tr class="bg-light font-weight-bold">
-					<td>${__("Exposure")}</td>
-					<td class="text-right">${fmt(sum("exposure"))}</td>
-				</tr>
 				<tr><td><b>${__("Hold OPRs")}</b></td><td class="text-right">${fmt(sum("hold_oprs"))}</td></tr>
 				<tr class="bg-info font-weight-bold">
 					<td>${__("Exposure after Hold OPRs")}</td>
