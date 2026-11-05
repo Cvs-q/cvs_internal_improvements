@@ -155,7 +155,11 @@ frappe.query_reports["Custom AR Exposure Summary"] = {
 };
 
 function show_exposure_summary(report) {
-	const data = (report.data || []).filter(r => r && r.customer);
+	// report.data still carries the server-appended "Total" row as its last item
+	// (Frappe only hides it from the datatable), so drop it or every figure doubles.
+	let rows = report.data || [];
+	if (report.raw_data && report.raw_data.add_total_row) rows = rows.slice(0, -1);
+	const data = rows.filter(r => r && r.customer);
 	if (!data.length) {
 		frappe.msgprint(__("No data to summarize"));
 		return;
