@@ -1,0 +1,23 @@
+/* Top-right Search button (see public/js/search_top_right.js) */
+.cvs-top-search {
+	position: fixed;
+	top: 12px;
+	right: 16px;
+	z-index: 1030;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+/* The search now lives top right, so hide the one in the left dock. */
+body.cvs-top-search-on #desk-dock .navbar-modal-search-mobile {
+	display: none;
+}
+
+/* Keep the page header's own buttons (menu, Save, ...) clear of the new button. */
+body.cvs-top-search-on .page-head .page-head-content {
+	padding-right: 56px;
+}
