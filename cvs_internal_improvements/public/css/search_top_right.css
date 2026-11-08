@@ -1,15 +1,36 @@
-/* Top-right Search button (see public/js/search_top_right.js) */
+/* Top-right v15-style search bar (see public/js/search_top_right.js) */
 .cvs-top-search {
 	position: fixed;
-	top: 12px;
+	top: 13px;
 	right: 16px;
 	z-index: 1030;
-	width: 32px;
+	width: 260px;
 	height: 32px;
-	padding: 0;
+	padding: 0 12px;
 	display: flex;
 	align-items: center;
-	justify-content: center;
+	gap: 8px;
+	border: none;
+	border-radius: var(--border-radius-md, 8px);
+	background: var(--control-bg, #f3f3f3);
+	color: var(--text-muted, #6b7280);
+	font-size: var(--text-md, 13px);
+	text-align: left;
+	cursor: pointer;
+}
+
+.cvs-top-search:hover {
+	background: var(--control-bg-on-gray, #ebebeb);
+}
+
+.cvs-top-search .icon {
+	flex: none;
+}
+
+.cvs-top-search-text {
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
 }
 
 /* The search now lives top right, so hide the one in the left dock. */
@@ -17,7 +38,22 @@ body.cvs-top-search-on #desk-dock .navbar-modal-search-mobile {
 	display: none;
 }
 
-/* Keep the page header's own buttons (menu, Save, ...) clear of the new button. */
+/* Keep the page header's own buttons (menu, Save, ...) clear of the bar. */
 body.cvs-top-search-on .page-head .page-head-content {
-	padding-right: 56px;
+	padding-right: 292px;
+}
+
+/* Narrow screens: shrink to an icon only. */
+@media (max-width: 1199px) {
+	.cvs-top-search {
+		width: 32px;
+		padding: 0;
+		justify-content: center;
+	}
+	.cvs-top-search-text {
+		display: none;
+	}
+	body.cvs-top-search-on .page-head .page-head-content {
+		padding-right: 56px;
+	}
 }
