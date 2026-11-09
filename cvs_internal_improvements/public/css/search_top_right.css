@@ -1,59 +1,80 @@
-/* Top-right v15-style search bar (see public/js/search_top_right.js) */
-.cvs-top-search {
+/* Full search trigger at the upper right. */
+#cvs-top-search {
 	position: fixed;
 	top: 13px;
-	right: 16px;
+	right: 100px;
 	z-index: 1030;
-	width: 260px;
-	height: 32px;
-	padding: 0 12px;
-	display: flex;
+	display: flex !important;
 	align-items: center;
 	gap: 8px;
-	border: none;
-	border-radius: var(--border-radius-md, 8px);
+	width: 320px !important;
+	max-width: calc(100vw - 120px);
+	height: 32px;
+	padding: 0 10px;
+	border: 1px solid var(--border-color, #e2e2e2);
+	border-radius: 8px;
 	background: var(--control-bg, #f3f3f3);
 	color: var(--text-muted, #6b7280);
-	font-size: var(--text-md, 13px);
+	font-family: inherit;
+	font-size: 13px;
 	text-align: left;
 	cursor: pointer;
 }
 
-.cvs-top-search:hover {
+#cvs-top-search:hover {
 	background: var(--control-bg-on-gray, #ebebeb);
 }
 
-.cvs-top-search .icon {
-	flex: none;
+#cvs-top-search:focus-visible {
+	outline: 2px solid var(--primary, #2490ef);
+	outline-offset: 2px;
 }
 
-.cvs-top-search-text {
+#cvs-top-search .icon {
+	flex-shrink: 0;
+}
+
+#cvs-top-search .cvs-top-search-text {
+	display: inline !important;
+	flex: 1;
+	min-width: 0;
 	overflow: hidden;
 	white-space: nowrap;
 	text-overflow: ellipsis;
 }
 
-/* The search now lives top right, so hide the one in the left dock. */
-body.cvs-top-search-on #desk-dock .navbar-modal-search-mobile {
-	display: none;
+.cvs-top-search-shortcut {
+	flex-shrink: 0;
+	font-size: 11px;
 }
 
-/* Keep the page header's own buttons (menu, Save, ...) clear of the bar. */
+/* Hide native Desk search triggers after our button is available.
+   Keep them in the DOM so their existing handlers remain intact. */
+body.cvs-top-search-on #desk-dock .navbar-modal-search-mobile,
+body.cvs-top-search-on .page-head .navbar-modal-search-mobile {
+	display: none !important;
+}
+
+/* Reserve room in workspace headers. */
 body.cvs-top-search-on .page-head .page-head-content {
-	padding-right: 292px;
+	padding-right: 440px;
 }
 
-/* Narrow screens: shrink to an icon only. */
-@media (max-width: 1199px) {
-	.cvs-top-search {
-		width: 32px;
+/* Only collapse to an icon on small phones. */
+@media (max-width: 575px) {
+	#cvs-top-search {
+		right: 60px;
+		width: 32px !important;
 		padding: 0;
 		justify-content: center;
 	}
-	.cvs-top-search-text {
-		display: none;
+
+	#cvs-top-search .cvs-top-search-text,
+	#cvs-top-search .cvs-top-search-shortcut {
+		display: none !important;
 	}
+
 	body.cvs-top-search-on .page-head .page-head-content {
-		padding-right: 56px;
+		padding-right: 104px;
 	}
 }
