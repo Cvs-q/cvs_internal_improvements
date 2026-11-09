@@ -5,7 +5,20 @@
 (function () {
 	const DOCK_SEARCH = "#desk-dock .navbar-modal-search-mobile";
 
+	// Frappe only creates the awesome bar when a Page is built (page.js setup_awesomebar), which
+	// hasn't happened yet on the Home workspace. Create it the same way if it's missing;
+	// the existence check stops Frappe from creating a second one later.
+	function ensure_awesome_bar() {
+		if (frappe.app.awesome_bar) return;
+		if (!frappe.boot.desk_settings.search_bar) return;
+		if (!frappe.search || !frappe.search.AwesomeBar) return;
+		const awesome_bar = new frappe.search.AwesomeBar();
+		awesome_bar.setup(".navbar-modal-search-mobile");
+		frappe.app.awesome_bar = awesome_bar;
+	}
+
 	function open_search() {
+		ensure_awesome_bar();
 		const bar = frappe.app && frappe.app.awesome_bar;
 		if (bar && typeof bar.open === "function") {
 			if (bar.is_open && bar.is_open()) bar.close();
