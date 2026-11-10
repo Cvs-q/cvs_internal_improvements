@@ -1,6 +1,7 @@
 import frappe
-from frappe import _
+from frappe import _, query_builder
 from frappe.query_builder.functions import IfNull, Sum
+from pypika.terms import Case
 from frappe.utils import flt, fmt_money, get_link_to_form
 
 from erpnext.accounts.report.accounts_receivable.accounts_receivable import ReceivablePayableReport
@@ -82,6 +83,45 @@ class StatementOfAccount(ReceivablePayableReport):
 		)
 		for d in je_projects:
 			self.invoice_details.setdefault(d.parent, {})["project"] = d.project
+
+	def get_future_payments_from_payment_entry(self):
+		"""Same as ERPNext's query, but counts draft Payment Entries too (docstatus < 2).
+
+		ERPNext v16 only counts submitted ones (docstatus == 1), so a post-dated cheque still
+		waiting for approval (e.g. workflow state "Submitted for Approval") was dropped from the
+		invoice-allocated PDC/LC while append_unallocated_pdc_rows() (which uses docstatus < 2)
+		still counted its unallocated part. v15 already uses docstatus < 2. A missing/zero
+		exchange rate is treated as 1 so such an entry is not silently skipped.
+		"""
+		pe = frappe.qb.DocType("Payment Entry")
+		pe_ref = frappe.qb.DocType("Payment Entry Reference")
+		ifelse = query_builder.CustomFunction("IF", ["condition", "then", "else"])
+
+		return (
+			frappe.qb.from_(pe)
+			.inner_join(pe_ref)
+			.on(pe_ref.parent == pe.name)
+			.select(
+				(pe_ref.reference_name).as_("invoice_no"),
+				pe.party,
+				pe.party_type,
+				(pe.posting_date).as_("future_date"),
+				(pe_ref.allocated_amount).as_("future_amount"),
+				(pe.reference_no).as_("future_ref"),
+				ifelse(
+					pe.payment_type == "Receive",
+					IfNull(Case().when(pe.source_exchange_rate == 0, 1).else_(pe.source_exchange_rate), 1)
+					* pe_ref.allocated_amount,
+					IfNull(Case().when(pe.target_exchange_rate == 0, 1).else_(pe.target_exchange_rate), 1)
+					* pe_ref.allocated_amount,
+				).as_("future_amount_in_base_currency"),
+			)
+			.where(
+				(pe.docstatus < 2)
+				& (pe.posting_date > self.filters.report_date)
+				& (pe.party_type.isin(self.party_type))
+			)
+		).run(as_dict=True)
 
 	def append_row(self, row):
 		super().append_row(row)
