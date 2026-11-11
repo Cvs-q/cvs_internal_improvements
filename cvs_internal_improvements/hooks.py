@@ -6,3 +6,7 @@ app_email = "iftikhar.hussain@cvshvac.com"
 app_license = "Proprietary"
 
 required_apps = ["erpnext"]
+
+# Top-right search bar + keyboard shortcuts (merged from cvs_search_bar)
+app_include_js = "cvs_internal_improvements.bundle.js"
+app_include_css = "cvs_internal_improvements.bundle.css"

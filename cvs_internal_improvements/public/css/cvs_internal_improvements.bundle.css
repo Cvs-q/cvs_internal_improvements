@@ -1,0 +1,166 @@
+/* Inline search box in the page header: first item of the right-hand group, buttons to its right.
+   Results drop down right under the box (like Frappe v15), not in a pop-up. */
+.cvs-top-search {
+	position: relative;
+	display: flex !important;
+	align-items: center;
+	flex: 0 1 320px;
+	width: 320px;
+	min-width: 160px;
+	height: 32px;
+	margin-right: 12px;
+}
+
+.cvs-top-search .awesomplete {
+	display: block;
+	position: relative;
+	width: 100%;
+}
+
+.cvs-top-search .awesomebar-input-row {
+	position: relative;
+	display: flex;
+	align-items: center;
+}
+
+.cvs-top-search .awesomebar-search-icon {
+	position: absolute;
+	left: 10px;
+	z-index: 1;
+	display: flex;
+	align-items: center;
+	color: var(--text-muted, #6b7280);
+	pointer-events: none;
+}
+
+.cvs-top-search .cvs-top-search-input {
+	width: 100% !important;
+	height: 32px;
+	padding: 0 48px 0 32px;
+	border: 1px solid var(--border-color, #e2e2e2);
+	border-radius: 8px;
+	background: var(--control-bg, #f3f3f3);
+	color: var(--text-color, #171717);
+	font-family: inherit;
+	font-size: 13px;
+	box-shadow: none;
+	outline: none;
+}
+
+.cvs-top-search .cvs-top-search-input::placeholder {
+	color: var(--text-muted, #6b7280);
+}
+
+.cvs-top-search .cvs-top-search-input:hover {
+	background: var(--control-bg-on-gray, #ebebeb);
+}
+
+.cvs-top-search .cvs-top-search-input:focus {
+	background: var(--fg-color, #fff);
+	border-color: var(--primary, #2490ef);
+}
+
+.cvs-top-search .cvs-top-search-shortcut {
+	position: absolute;
+	right: 10px;
+	top: 50%;
+	transform: translateY(-50%);
+	font-size: 11px;
+	color: var(--text-muted, #6b7280);
+	pointer-events: none;
+}
+
+.cvs-top-search:focus-within .cvs-top-search-shortcut {
+	display: none;
+}
+
+/* Results list (Awesomplete) */
+.cvs-top-search .awesomplete > ul {
+	position: absolute;
+	top: calc(100% + 4px);
+	left: 0;
+	z-index: 1050;
+	min-width: 420px;
+	max-height: 60vh;
+	margin: 0;
+	padding: 4px;
+	overflow-y: auto;
+	list-style: none;
+	background: var(--fg-color, #fff);
+	border: 1px solid var(--border-color, #e2e2e2);
+	border-radius: 8px;
+	box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.15));
+	text-align: left;
+}
+
+.cvs-top-search .awesomplete > ul[hidden],
+.cvs-top-search .awesomplete > ul:empty {
+	display: none;
+}
+
+.cvs-top-search .awesomplete > ul > li {
+	padding: 6px 10px;
+	border-radius: 6px;
+	cursor: pointer;
+}
+
+.cvs-top-search .awesomplete > ul > li a {
+	display: block;
+	color: var(--text-color, #171717);
+	text-decoration: none;
+}
+
+.cvs-top-search .awesomplete > ul > li:hover,
+.cvs-top-search .awesomplete > ul > li[aria-selected="true"] {
+	background: var(--control-bg, #f3f3f3);
+}
+
+/* Hide native Desk search triggers after our box is available.
+   Keep them in the DOM so their existing handlers remain intact. */
+body.cvs-top-search-on #desk-dock .navbar-modal-search-mobile,
+body.cvs-top-search-on .page-head .navbar-modal-search-mobile {
+	display: none !important;
+}
+
+/* /desk start page: hide the centered search once ours is in the right-hand group. */
+.desktop-navbar:has(.cvs-top-search) .search-widget-wrapper {
+	display: none !important;
+}
+
+/* Narrower windows: a slimmer search box leaves room for the page title and buttons. */
+@media (max-width: 1500px) {
+	.cvs-top-search {
+		flex-basis: 220px;
+		width: 220px;
+	}
+}
+
+@media (max-width: 1200px) {
+	.cvs-top-search {
+		flex-basis: 170px;
+		width: 170px;
+		min-width: 170px;
+	}
+
+	.cvs-top-search .cvs-top-search-shortcut {
+		display: none;
+	}
+
+	.cvs-top-search .awesomplete > ul {
+		min-width: 340px;
+	}
+}
+
+/* Phones: let the box shrink to what fits. */
+@media (max-width: 575px) {
+	.cvs-top-search {
+		flex: 1 1 120px;
+		width: auto;
+		min-width: 120px;
+		margin-right: 8px;
+	}
+
+	.cvs-top-search .awesomplete > ul {
+		min-width: 260px;
+	}
+}
