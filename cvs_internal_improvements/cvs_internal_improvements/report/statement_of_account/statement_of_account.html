@@ -38,11 +38,9 @@
 		padding-left: 3px !important;
 		padding-right: 3px !important;
 	}
-	/* Portrait: a 14mm Date column only fits "dd-mm-yyyy" at a slightly smaller font and tighter padding */
-	.print-format:not(.landscape) td.soa-date {
-		font-size: 6.3pt;
-		padding-left: 1.5px !important;
-		padding-right: 1.5px !important;
+	/* Date cells use the same font as the rest of the table (dd-mm-yyyy fits the column at that size) */
+	.print-format td.soa-date {
+		font-size: inherit;
 	}
 	/* Portrait has ~30% less width than landscape - a slightly smaller font keeps dates and
 	   amounts (including the bold Total row) on one line there. Landscape is unchanged. */
